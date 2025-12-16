@@ -5,16 +5,18 @@ const app = express();
 const server = http.createServer(app);
 
 /* ============================
-   SOCKET.IO — WEBSOCKET ONLY
+   SOCKET.IO — RENDER SAFE
 ============================ */
 const { Server } = require('socket.io');
 
 const io = new Server(server, {
-  transports: ['websocket'], // ⬅️ CRUCIAL
+  transports: ['polling', 'websocket'],
   cors: {
-    origin: true,            // ⬅️ renvoie l'origin automatiquement
-    methods: ['GET', 'POST']
-  }
+    origin: true,           // ⬅️ OBLIGATOIRE SUR RENDER
+    methods: ['GET', 'POST'],
+    credentials: true
+  },
+  allowEIO3: true
 });
 
 /* ============================
@@ -39,7 +41,7 @@ const matchState = {
 };
 
 /* ============================
-   BROADCAST SAFE
+   BROADCAST (SYNC SAFE)
 ============================ */
 function broadcast() {
   io.emit('state:update', matchState);
@@ -81,7 +83,7 @@ function stopClock() {
    SOCKET EVENTS
 ============================ */
 io.on('connection', socket => {
-  console.log('✅ Client connecté', socket.handshake.origin);
+  console.log('✅ Client connecté depuis', socket.handshake.headers.origin);
 
   socket.emit('state:update', matchState);
 
@@ -154,6 +156,6 @@ io.on('connection', socket => {
    SERVER
 ============================ */
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Socket server écoute sur le port ${PORT}`);
+server.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Socket server running on port ${PORT}`);
 });
