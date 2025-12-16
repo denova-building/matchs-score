@@ -10,9 +10,9 @@ const server = http.createServer(app);
 const { Server } = require('socket.io');
 
 const io = new Server(server, {
-  transports: ['polling', 'websocket'],
+  transports: ['polling', 'websocket'], // polling obligatoire sur Render
   cors: {
-    origin: true,           // ⬅️ OBLIGATOIRE SUR RENDER
+    origin: true,          // accepte dynamiquement toutes les origines
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -41,42 +41,69 @@ const matchState = {
 };
 
 /* ============================
-   BROADCAST (SYNC SAFE)
+   LOGS POUR CRASH
+============================ */
+process.on('uncaughtException', function(err) {
+  console.error('Uncaught Exception:', err);
+});
+
+process.on('unhandledRejection', function(reason, promise) {
+  console.error('Unhandled Rejection:', reason);
+});
+
+/* ============================
+   BROADCAST SAFE
 ============================ */
 function broadcast() {
-  io.emit('state:update', matchState);
+  try {
+    io.emit('state:update', matchState);
+  } catch(err) {
+    console.error('Erreur broadcast:', err);
+  }
 }
 
 /* ============================
    CLOCK
 ============================ */
 function tick() {
-  if (!matchState.clock.running) return;
+  try {
+    if (!matchState.clock.running) return;
 
-  if (matchState.clock.sec === 0) {
-    if (matchState.clock.min === 0) {
-      stopClock();
-      return;
+    if (matchState.clock.sec === 0) {
+      if (matchState.clock.min === 0) {
+        stopClock();
+        return;
+      }
+      matchState.clock.min--;
+      matchState.clock.sec = 59;
+    } else {
+      matchState.clock.sec--;
     }
-    matchState.clock.min--;
-    matchState.clock.sec = 59;
-  } else {
-    matchState.clock.sec--;
-  }
 
-  broadcast();
+    broadcast();
+  } catch(err) {
+    console.error('Erreur tick:', err);
+  }
 }
 
 function startClock() {
-  if (matchState.clock.interval) return;
-  matchState.clock.running = true;
-  matchState.clock.interval = setInterval(tick, 1000);
+  try {
+    if (matchState.clock.interval) return;
+    matchState.clock.running = true;
+    matchState.clock.interval = setInterval(tick, 1000);
+  } catch(err) {
+    console.error('Erreur startClock:', err);
+  }
 }
 
 function stopClock() {
-  matchState.clock.running = false;
-  clearInterval(matchState.clock.interval);
-  matchState.clock.interval = null;
+  try {
+    matchState.clock.running = false;
+    clearInterval(matchState.clock.interval);
+    matchState.clock.interval = null;
+  } catch(err) {
+    console.error('Erreur stopClock:', err);
+  }
 }
 
 /* ============================
@@ -85,70 +112,91 @@ function stopClock() {
 io.on('connection', socket => {
   console.log('✅ Client connecté depuis', socket.handshake.headers.origin);
 
-  socket.emit('state:update', matchState);
+  // Sync initial
+  try { socket.emit('state:update', matchState); } 
+  catch(err){ console.error('Erreur init emit:', err); }
 
+  // INIT MATCH
   socket.on('match:init', data => {
-    stopClock();
-
-    matchState.teamA = data.teamA || 'ÉQUIPE A';
-    matchState.teamB = data.teamB || 'ÉQUIPE B';
-    matchState.scoreA = 0;
-    matchState.scoreB = 0;
-    matchState.foulA = 0;
-    matchState.foulB = 0;
-    matchState.quarter = 1;
-    matchState.overtime = false;
-
-    matchState.defaultQuarterTime = parseInt(data.quarterTime) || 10;
-    matchState.clock.min = matchState.defaultQuarterTime;
-    matchState.clock.sec = 0;
-
-    broadcast();
+    try {
+      stopClock();
+      matchState.teamA = data.teamA || 'ÉQUIPE A';
+      matchState.teamB = data.teamB || 'ÉQUIPE B';
+      matchState.scoreA = 0;
+      matchState.scoreB = 0;
+      matchState.foulA = 0;
+      matchState.foulB = 0;
+      matchState.quarter = 1;
+      matchState.overtime = false;
+      matchState.defaultQuarterTime = parseInt(data.quarterTime) || 10;
+      matchState.clock.min = matchState.defaultQuarterTime;
+      matchState.clock.sec = 0;
+      broadcast();
+    } catch(err){ console.error('Erreur match:init:', err); }
   });
 
-  socket.on('clock:start', startClock);
-  socket.on('clock:stop', stopClock);
+  // CLOCK
+  socket.on('clock:start', () => { try { startClock(); } catch(err){console.error(err);} });
+  socket.on('clock:stop', () => { try { stopClock(); } catch(err){console.error(err);} });
 
   socket.on('quarter:next', () => {
-    stopClock();
-    matchState.quarter++;
-    matchState.clock.min = matchState.defaultQuarterTime;
-    matchState.clock.sec = 0;
-    broadcast();
+    try {
+      stopClock();
+      matchState.quarter++;
+      matchState.clock.min = matchState.defaultQuarterTime;
+      matchState.clock.sec = 0;
+      broadcast();
+    } catch(err){console.error(err);}
   });
 
   socket.on('overtime:start', () => {
-    stopClock();
-    matchState.overtime = true;
-    matchState.clock.min = 5;
-    matchState.clock.sec = 0;
-    broadcast();
+    try {
+      stopClock();
+      matchState.overtime = true;
+      matchState.clock.min = 5;
+      matchState.clock.sec = 0;
+      broadcast();
+    } catch(err){console.error(err);}
   });
 
+  // SCORES
   socket.on('score:add', ({ team, pts }) => {
-    if (!['A', 'B'].includes(team)) return;
-    if (![1, 2].includes(pts)) return;
-    matchState[`score${team}`] += pts;
-    broadcast();
+    try {
+      if (!['A','B'].includes(team)) return;
+      if (![1,2].includes(pts)) return;
+      matchState[`score${team}`] += pts;
+      broadcast();
+    } catch(err){console.error('Erreur score:add:', err);}
   });
 
   socket.on('score:sub', ({ team, pts }) => {
-    if (!['A', 'B'].includes(team)) return;
-    if (![1, 2].includes(pts)) return;
-    matchState[`score${team}`] = Math.max(0, matchState[`score${team}`] - pts);
-    broadcast();
+    try {
+      if (!['A','B'].includes(team)) return;
+      if (![1,2].includes(pts)) return;
+      matchState[`score${team}`] = Math.max(0, matchState[`score${team}`]-pts);
+      broadcast();
+    } catch(err){console.error('Erreur score:sub:', err);}
   });
 
+  // FAUTES
   socket.on('foul:add', ({ team }) => {
-    if (!['A', 'B'].includes(team)) return;
-    matchState[`foul${team}`]++;
-    broadcast();
+    try {
+      if (!['A','B'].includes(team)) return;
+      matchState[`foul${team}`]++;
+      broadcast();
+    } catch(err){console.error('Erreur foul:add:', err);}
   });
 
   socket.on('foul:sub', ({ team }) => {
-    if (!['A', 'B'].includes(team)) return;
-    matchState[`foul${team}`] = Math.max(0, matchState[`foul${team}`] - 1);
-    broadcast();
+    try {
+      if (!['A','B'].includes(team)) return;
+      matchState[`foul${team}`] = Math.max(0, matchState[`foul${team}`]-1);
+      broadcast();
+    } catch(err){console.error('Erreur foul:sub:', err);}
+  });
+
+  socket.on('disconnect', () => {
+    console.log('❌ Client déconnecté');
   });
 });
 
