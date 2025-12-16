@@ -5,19 +5,15 @@ const app = express();
 const server = http.createServer(app);
 
 /* ============================
-   SOCKET.IO + CORS FIABLE
+   SOCKET.IO — WEBSOCKET ONLY
 ============================ */
-const allowedOrigins = [
-  'https://mbolostats.com',
-  'https://matchs-score.onrender.com'
-];
-
 const { Server } = require('socket.io');
+
 const io = new Server(server, {
+  transports: ['websocket'], // ⬅️ CRUCIAL
   cors: {
-    origin: allowedOrigins,
-    methods: ['GET', 'POST'],
-    credentials: true
+    origin: true,            // ⬅️ renvoie l'origin automatiquement
+    methods: ['GET', 'POST']
   }
 });
 
@@ -45,21 +41,12 @@ const matchState = {
 /* ============================
    BROADCAST SAFE
 ============================ */
-let isBroadcasting = false;
-
-function safeBroadcast() {
-  if (isBroadcasting) return;
-  isBroadcasting = true;
-
+function broadcast() {
   io.emit('state:update', matchState);
-
-  setImmediate(() => {
-    isBroadcasting = false;
-  });
 }
 
 /* ============================
-   CLOCK LOGIC
+   CLOCK
 ============================ */
 function tick() {
   if (!matchState.clock.running) return;
@@ -75,12 +62,11 @@ function tick() {
     matchState.clock.sec--;
   }
 
-  safeBroadcast();
+  broadcast();
 }
 
 function startClock() {
   if (matchState.clock.interval) return;
-
   matchState.clock.running = true;
   matchState.clock.interval = setInterval(tick, 1000);
 }
@@ -95,12 +81,10 @@ function stopClock() {
    SOCKET EVENTS
 ============================ */
 io.on('connection', socket => {
-  console.log('✅ Client connecté');
+  console.log('✅ Client connecté', socket.handshake.origin);
 
-  // Sync immédiate
   socket.emit('state:update', matchState);
 
-  /* INIT MATCH */
   socket.on('match:init', data => {
     stopClock();
 
@@ -117,10 +101,9 @@ io.on('connection', socket => {
     matchState.clock.min = matchState.defaultQuarterTime;
     matchState.clock.sec = 0;
 
-    safeBroadcast();
+    broadcast();
   });
 
-  /* CLOCK */
   socket.on('clock:start', startClock);
   socket.on('clock:stop', stopClock);
 
@@ -129,7 +112,7 @@ io.on('connection', socket => {
     matchState.quarter++;
     matchState.clock.min = matchState.defaultQuarterTime;
     matchState.clock.sec = 0;
-    safeBroadcast();
+    broadcast();
   });
 
   socket.on('overtime:start', () => {
@@ -137,49 +120,33 @@ io.on('connection', socket => {
     matchState.overtime = true;
     matchState.clock.min = 5;
     matchState.clock.sec = 0;
-    safeBroadcast();
+    broadcast();
   });
 
-  /* SCORES */
   socket.on('score:add', ({ team, pts }) => {
     if (!['A', 'B'].includes(team)) return;
     if (![1, 2].includes(pts)) return;
-
     matchState[`score${team}`] += pts;
-    safeBroadcast();
+    broadcast();
   });
 
   socket.on('score:sub', ({ team, pts }) => {
     if (!['A', 'B'].includes(team)) return;
     if (![1, 2].includes(pts)) return;
-
-    matchState[`score${team}`] = Math.max(
-      0,
-      matchState[`score${team}`] - pts
-    );
-    safeBroadcast();
+    matchState[`score${team}`] = Math.max(0, matchState[`score${team}`] - pts);
+    broadcast();
   });
 
-  /* FAUTES */
   socket.on('foul:add', ({ team }) => {
     if (!['A', 'B'].includes(team)) return;
-
     matchState[`foul${team}`]++;
-    safeBroadcast();
+    broadcast();
   });
 
   socket.on('foul:sub', ({ team }) => {
     if (!['A', 'B'].includes(team)) return;
-
-    matchState[`foul${team}`] = Math.max(
-      0,
-      matchState[`foul${team}`] - 1
-    );
-    safeBroadcast();
-  });
-
-  socket.on('disconnect', () => {
-    console.log('❌ Client déconnecté');
+    matchState[`foul${team}`] = Math.max(0, matchState[`foul${team}`] - 1);
+    broadcast();
   });
 });
 
@@ -188,5 +155,5 @@ io.on('connection', socket => {
 ============================ */
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`🚀 Socket server running on port ${PORT}`);
+  console.log(`🚀 Socket server écoute sur le port ${PORT}`);
 });
