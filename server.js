@@ -14,7 +14,9 @@ const io = require('socket.io')(server, {
     origin: (origin, callback) => {
       if (!origin) return callback(null, true);
       const allowedOrigins = [
+        /\.onrender\.com$/,
         /\.mbolostats\.com$/,
+        'https://onrender.com',
         'https://mbolostats.com'
       ];
       if (allowedOrigins.some(o => typeof o === 'string' ? o === origin : o.test(origin))) {
@@ -32,6 +34,13 @@ const io = require('socket.io')(server, {
 ============================ */
 app.use(cors());
 app.use(bodyParser.json());
+
+/* ============================
+   ROUTE HTTP POUR RENDER / TEST
+============================ */
+app.get('/', (req,res)=>{
+  res.send('Server running ✅');
+});
 
 /* ============================
    ÉTAT DU MATCH
@@ -72,6 +81,7 @@ function broadcast() {
 function startClock() {
   if (matchState.clock.running) return;
   matchState.clock.running = true;
+
   matchState.clock.interval = setInterval(() => {
     if (matchState.clock.min === 0 && matchState.clock.sec === 0) {
       stopClock();
@@ -91,6 +101,7 @@ function stopClock() {
   matchState.clock.running = false;
   clearInterval(matchState.clock.interval);
   matchState.clock.interval = null;
+  broadcast();
 }
 
 /* ============================
@@ -101,13 +112,18 @@ function startPossession(team) {
   matchState.possession.team = team;
   matchState.possession.sec = 12;
   matchState.possession.running = true;
+
   matchState.possession.interval = setInterval(() => {
-    if (matchState.possession.sec === 0) {
+    if (matchState.possession.sec <= 0) {
       stopPossession();
       return;
     }
     matchState.possession.sec--;
-    broadcast();
+    io.emit('possession:update', {
+      team: matchState.possession.team,
+      sec: matchState.possession.sec,
+      running: matchState.possession.running
+    });
   }, 1000);
 }
 
@@ -115,13 +131,22 @@ function stopPossession() {
   matchState.possession.running = false;
   clearInterval(matchState.possession.interval);
   matchState.possession.interval = null;
+  io.emit('possession:update', {
+    team: matchState.possession.team,
+    sec: matchState.possession.sec,
+    running: matchState.possession.running
+  });
 }
 
 function resetPossession(team = null) {
   stopPossession();
   matchState.possession.team = team;
   matchState.possession.sec = 12;
-  broadcast();
+  io.emit('possession:update', {
+    team: matchState.possession.team,
+    sec: matchState.possession.sec,
+    running: matchState.possession.running
+  });
 }
 
 /* ============================
@@ -129,12 +154,16 @@ function resetPossession(team = null) {
 ============================ */
 io.on('connection', socket => {
   console.log('✅ Client connecté');
+
+  // Envoi immédiat de l'état complet
   socket.emit('state:update', matchState);
+  socket.emit('possession:update', matchState.possession);
 
   /* INIT MATCH */
   socket.on('match:init', data => {
     stopClock();
     stopPossession();
+
     matchState.teamA = data.teamA || 'ÉQUIPE A';
     matchState.teamB = data.teamB || 'ÉQUIPE B';
     matchState.scoreA = 0;
@@ -145,6 +174,7 @@ io.on('connection', socket => {
     matchState.overtime = false;
     matchState.clock.min = parseInt(data.quarterTime) || 10;
     matchState.clock.sec = 0;
+
     broadcast();
   });
 
