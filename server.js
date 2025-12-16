@@ -10,9 +10,9 @@ const server = http.createServer(app);
 const { Server } = require('socket.io');
 
 const io = new Server(server, {
-  transports: ['polling', 'websocket'], // polling obligatoire sur Render
+  transports: ['polling', 'websocket'],
   cors: {
-    origin: true,          // accepte dynamiquement toutes les origines
+    origin: true,
     methods: ['GET', 'POST'],
     credentials: true
   },
@@ -35,6 +35,12 @@ const matchState = {
   clock: {
     min: 10,
     sec: 0,
+    running: false,
+    interval: null
+  },
+  possession: {
+    team: null,
+    sec: 12,
     running: false,
     interval: null
   }
@@ -63,12 +69,11 @@ function broadcast() {
 }
 
 /* ============================
-   CLOCK
+   CLOCK PRINCIPAL
 ============================ */
 function tick() {
   try {
     if (!matchState.clock.running) return;
-
     if (matchState.clock.sec === 0) {
       if (matchState.clock.min === 0) {
         stopClock();
@@ -79,11 +84,8 @@ function tick() {
     } else {
       matchState.clock.sec--;
     }
-
     broadcast();
-  } catch(err) {
-    console.error('Erreur tick:', err);
-  }
+  } catch(err){ console.error('Erreur tick:', err); }
 }
 
 function startClock() {
@@ -91,9 +93,7 @@ function startClock() {
     if (matchState.clock.interval) return;
     matchState.clock.running = true;
     matchState.clock.interval = setInterval(tick, 1000);
-  } catch(err) {
-    console.error('Erreur startClock:', err);
-  }
+  } catch(err){ console.error('Erreur startClock:', err); }
 }
 
 function stopClock() {
@@ -101,9 +101,51 @@ function stopClock() {
     matchState.clock.running = false;
     clearInterval(matchState.clock.interval);
     matchState.clock.interval = null;
-  } catch(err) {
-    console.error('Erreur stopClock:', err);
-  }
+  } catch(err){ console.error('Erreur stopClock:', err); }
+}
+
+/* ============================
+   CHRONO DE POSSESSION
+============================ */
+function tickPossession() {
+  try {
+    if (!matchState.possession.running) return;
+    if (matchState.possession.sec === 0) {
+      stopPossession();
+    } else {
+      matchState.possession.sec--;
+    }
+    broadcast();
+  } catch(err){ console.error('Erreur tickPossession:', err); }
+}
+
+function startPossession(team) {
+  try {
+    stopPossession();
+    matchState.possession.team = team;
+    matchState.possession.sec = 12;
+    matchState.possession.running = true;
+    matchState.possession.interval = setInterval(tickPossession, 1000);
+    broadcast();
+  } catch(err){ console.error('Erreur startPossession:', err); }
+}
+
+function stopPossession() {
+  try {
+    matchState.possession.running = false;
+    clearInterval(matchState.possession.interval);
+    matchState.possession.interval = null;
+    broadcast();
+  } catch(err){ console.error('Erreur stopPossession:', err); }
+}
+
+function resetPossession(team=null) {
+  try {
+    stopPossession();
+    matchState.possession.team = team;
+    matchState.possession.sec = 12;
+    broadcast();
+  } catch(err){ console.error('Erreur resetPossession:', err); }
 }
 
 /* ============================
@@ -120,6 +162,7 @@ io.on('connection', socket => {
   socket.on('match:init', data => {
     try {
       stopClock();
+      stopPossession();
       matchState.teamA = data.teamA || 'ÉQUIPE A';
       matchState.teamB = data.teamB || 'ÉQUIPE B';
       matchState.scoreA = 0;
@@ -131,6 +174,8 @@ io.on('connection', socket => {
       matchState.defaultQuarterTime = parseInt(data.quarterTime) || 10;
       matchState.clock.min = matchState.defaultQuarterTime;
       matchState.clock.sec = 0;
+      matchState.possession.team = null;
+      matchState.possession.sec = 12;
       broadcast();
     } catch(err){ console.error('Erreur match:init:', err); }
   });
@@ -194,6 +239,11 @@ io.on('connection', socket => {
       broadcast();
     } catch(err){console.error('Erreur foul:sub:', err);}
   });
+
+  // POSSESSION
+  socket.on('possession:start', ({ team }) => { startPossession(team); });
+  socket.on('possession:stop', () => { stopPossession(); });
+  socket.on('possession:reset', ({ team }) => { resetPossession(team); });
 
   socket.on('disconnect', () => {
     console.log('❌ Client déconnecté');
