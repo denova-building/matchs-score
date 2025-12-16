@@ -1,0 +1,173 @@
+const express = require('express');
+const http = require('http');
+const cors = require('cors');
+const bodyParser = require('body-parser');
+
+const app = express();
+const server = http.createServer(app);
+
+/* ============================
+   SOCKET.IO + CORS SÉCURISÉ
+============================ */
+const io = require('socket.io')(server, {
+  cors: {
+    origin: (origin, callback) => {
+      if (!origin) return callback(null, true);
+
+      const allowedOrigins = [
+        /\.boostpub-ga\.com$/,
+        /\.mbolostats\.com$/,
+        'https://boostpub-ga.com',
+        'https://mbolostats.com'
+      ];
+
+      if (allowedOrigins.some(o => typeof o === 'string' ? o === origin : o.test(origin))) {
+        callback(null, true);
+      } else {
+        callback(new Error('CORS not allowed'));
+      }
+    },
+    methods: ['GET', 'POST']
+  }
+});
+
+/* ============================
+   MIDDLEWARE
+============================ */
+app.use(cors());
+app.use(bodyParser.json());
+
+/* ============================
+   ÉTAT DU MATCH (SOURCE DE VÉRITÉ)
+============================ */
+const matchState = {
+  teamA: '',
+  teamB: '',
+  scoreA: 0,
+  scoreB: 0,
+  foulA: 0,
+  foulB: 0,
+  quarter: 1,
+  overtime: false,
+  clock: {
+    min: 10,
+    sec: 0,
+    running: false,
+    interval: null
+  }
+};
+
+/* ============================
+   FONCTIONS UTILITAIRES
+============================ */
+function broadcast() {
+  io.emit('state:update', matchState);
+}
+
+function startClock() {
+  if (matchState.clock.running) return;
+
+  matchState.clock.running = true;
+
+  matchState.clock.interval = setInterval(() => {
+    if (matchState.clock.sec === 0) {
+      if (matchState.clock.min === 0) {
+        stopClock();
+        return;
+      }
+      matchState.clock.min--;
+      matchState.clock.sec = 59;
+    } else {
+      matchState.clock.sec--;
+    }
+    broadcast();
+  }, 1000);
+}
+
+function stopClock() {
+  matchState.clock.running = false;
+  clearInterval(matchState.clock.interval);
+  matchState.clock.interval = null;
+}
+
+/* ============================
+   SOCKET EVENTS
+============================ */
+io.on('connection', socket => {
+  console.log('✅ Client connecté');
+
+  // Sync immédiate
+  socket.emit('state:update', matchState);
+
+  /* INIT MATCH */
+  socket.on('match:init', data => {
+    stopClock();
+    matchState.teamA = data.teamA || 'ÉQUIPE A';
+    matchState.teamB = data.teamB || 'ÉQUIPE B';
+    matchState.scoreA = 0;
+    matchState.scoreB = 0;
+    matchState.foulA = 0;
+    matchState.foulB = 0;
+    matchState.quarter = 1;
+    matchState.overtime = false;
+    matchState.clock.min = parseInt(data.quarterTime) || 10;
+    matchState.clock.sec = 0;
+    broadcast();
+  });
+
+  /* CLOCK */
+  socket.on('clock:start', startClock);
+  socket.on('clock:stop', stopClock);
+
+  socket.on('quarter:next', () => {
+    stopClock();
+    matchState.quarter++;
+    matchState.clock.min = 10;
+    matchState.clock.sec = 0;
+    broadcast();
+  });
+
+  socket.on('overtime:start', () => {
+    stopClock();
+    matchState.overtime = true;
+    matchState.clock.min = 5;
+    matchState.clock.sec = 0;
+    broadcast();
+  });
+
+  /* SCORES */
+  socket.on('score:add', ({ team, pts }) => {
+    if (![1,2].includes(pts)) return;
+    matchState[`score${team}`] += pts;
+    broadcast();
+  });
+
+  socket.on('score:sub', ({ team, pts }) => {
+    if (![1,2].includes(pts)) return;
+    matchState[`score${team}`] = Math.max(0, matchState[`score${team}`] - pts);
+    broadcast();
+  });
+
+  /* FAUTES */
+  socket.on('foul:add', ({ team }) => {
+    matchState[`foul${team}`]++;
+    broadcast();
+  });
+
+  socket.on('foul:sub', ({ team }) => {
+    matchState[`foul${team}`] = Math.max(0, matchState[`foul${team}`] - 1);
+    broadcast();
+  });
+
+  socket.on('disconnect', () => {
+    console.log('❌ Client déconnecté');
+  });
+});
+
+/* ============================
+   SERVER
+============================ */
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`🚀 Socket server running on port ${PORT}`);
+});
