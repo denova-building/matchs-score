@@ -1,21 +1,30 @@
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const cors = require('cors');
 
 const app = express();
 const server = http.createServer(app);
 
 /* ============================
-   SOCKET.IO — RENDER SAFE
+   CORS
+============================ */
+app.use(cors({
+  origin: 'https://mbolostats.com',
+  methods: ['GET','POST'],
+  credentials: true
+}));
+
+/* ============================
+   SOCKET.IO
 ============================ */
 const io = new Server(server, {
-  transports: ['polling', 'websocket'],
   cors: {
-    origin: true,
-    methods: ['GET', 'POST'],
+    origin: 'https://mbolostats.com',
+    methods: ['GET','POST'],
     credentials: true
   },
-  allowEIO3: true
+  transports: ['websocket', 'polling']
 });
 
 /* ============================
@@ -34,29 +43,47 @@ const matchState = {
   clock: {
     min: 10,
     sec: 0,
+    running: false,
     interval: null
   },
   possession: {
     team: null,
     time: 12,
+    running: false,
     interval: null
   }
 };
 
-let gameRunning = false; // état maître
-
 /* ============================
-   BROADCAST
+   BROADCAST SAFE
 ============================ */
 function broadcast() {
-  io.emit('state:update', matchState);
+  const safeState = {
+    teamA: matchState.teamA,
+    teamB: matchState.teamB,
+    scoreA: matchState.scoreA,
+    scoreB: matchState.scoreB,
+    foulA: matchState.foulA,
+    foulB: matchState.foulB,
+    quarter: matchState.quarter,
+    overtime: matchState.overtime,
+    clock: {
+      min: matchState.clock.min,
+      sec: matchState.clock.sec
+    },
+    possession: {
+      team: matchState.possession.team,
+      time: matchState.possession.time
+    }
+  };
+  io.emit('state:update', safeState);
 }
 
 /* ============================
    CHRONO PRINCIPAL
 ============================ */
 function tickMainClock() {
-  if (!gameRunning) return;
+  if (!matchState.clock.running) return;
 
   if (matchState.clock.sec === 0) {
     if (matchState.clock.min === 0) {
@@ -73,20 +100,31 @@ function tickMainClock() {
 }
 
 function startMainClock() {
-  if (matchState.clock.interval) return;
+  if (matchState.clock.running) return;
+  matchState.clock.running = true;
+
+  // Stop le chrono de possession si déjà lancé
+  if (matchState.possession.running) stopPossession();
+
   matchState.clock.interval = setInterval(tickMainClock, 1000);
 }
 
 function stopMainClock() {
-  clearInterval(matchState.clock.interval);
-  matchState.clock.interval = null;
+  matchState.clock.running = false;
+  if (matchState.clock.interval) {
+    clearInterval(matchState.clock.interval);
+    matchState.clock.interval = null;
+  }
+
+  // Stopper aussi le chrono de possession
+  if (matchState.possession.running) stopPossession();
 }
 
 /* ============================
    CHRONO DE POSSESSION
 ============================ */
 function tickPossession() {
-  if (!gameRunning) return;
+  if (!matchState.possession.running) return;
 
   if (matchState.possession.time === 0) {
     stopPossession();
@@ -98,19 +136,21 @@ function tickPossession() {
 }
 
 function startPossession(team) {
-  stopPossession(); // reset
-  if (!gameRunning) return;
+  if (matchState.possession.running) stopPossession();
 
   matchState.possession.team = team;
   matchState.possession.time = 12;
+  matchState.possession.running = true;
+
   matchState.possession.interval = setInterval(tickPossession, 1000);
-  broadcast();
 }
 
 function stopPossession() {
-  clearInterval(matchState.possession.interval);
-  matchState.possession.interval = null;
-  broadcast();
+  matchState.possession.running = false;
+  if (matchState.possession.interval) {
+    clearInterval(matchState.possession.interval);
+    matchState.possession.interval = null;
+  }
 }
 
 function resetPossession() {
@@ -126,7 +166,11 @@ function resetPossession() {
 io.on('connection', socket => {
   console.log('✅ Client connecté');
 
-  socket.emit('state:update', matchState);
+  socket.emit('state:update', {
+    ...matchState,
+    clock: { min: matchState.clock.min, sec: matchState.clock.sec },
+    possession: { team: matchState.possession.team, time: matchState.possession.time }
+  });
 
   /* INIT MATCH */
   socket.on('match:init', data => {
@@ -145,24 +189,13 @@ io.on('connection', socket => {
     matchState.clock.min = matchState.defaultQuarterTime;
     matchState.clock.sec = 0;
 
-    gameRunning = false; // match initialisé mais pas démarré
     broadcast();
   });
 
-  /* START / STOP JEU */
-  socket.on('game:start', () => {
-    gameRunning = true;
-    startMainClock();
-    if (matchState.possession.team) startPossession(matchState.possession.team);
-  });
+  /* CLOCK */
+  socket.on('clock:start', startMainClock);
+  socket.on('clock:stop', stopMainClock);
 
-  socket.on('game:stop', () => {
-    gameRunning = false;
-    stopMainClock();
-    stopPossession();
-  });
-
-  /* QUARTER / OVERTIME */
   socket.on('quarter:next', () => {
     stopMainClock();
     matchState.quarter++;
@@ -181,13 +214,15 @@ io.on('connection', socket => {
 
   /* SCORES */
   socket.on('score:add', ({ team, pts }) => {
-    if (!['A','B'].includes(team) || ![1,2].includes(pts)) return;
+    if (!['A','B'].includes(team)) return;
+    if (![1,2].includes(pts)) return;
     matchState[`score${team}`] += pts;
     broadcast();
   });
 
   socket.on('score:sub', ({ team, pts }) => {
-    if (!['A','B'].includes(team) || ![1,2].includes(pts)) return;
+    if (!['A','B'].includes(team)) return;
+    if (![1,2].includes(pts)) return;
     matchState[`score${team}`] = Math.max(0, matchState[`score${team}`] - pts);
     broadcast();
   });
@@ -209,10 +244,17 @@ io.on('connection', socket => {
   socket.on('possession:start', ({ team }) => {
     if (!['A','B'].includes(team)) return;
     startPossession(team);
+    broadcast();
   });
 
-  socket.on('possession:stop', stopPossession);
-  socket.on('possession:reset', resetPossession);
+  socket.on('possession:stop', () => {
+    stopPossession();
+    broadcast();
+  });
+
+  socket.on('possession:reset', () => {
+    resetPossession();
+  });
 
   socket.on('disconnect', () => {
     console.log('❌ Client déconnecté');
