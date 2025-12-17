@@ -135,23 +135,33 @@ function tickPossession() {
   broadcast();
 }
 
+
 function startPossession(team) {
-  if (matchState.possession.running) stopPossession();
+  if (matchState.possession.interval) return; // déjà en cours
 
   matchState.possession.team = team;
-  matchState.possession.time = 12;
   matchState.possession.running = true;
+
+  // Si on n'avait pas de temps restant, on initialise à 12
+  if (matchState.possession.time === 0) matchState.possession.time = 12;
+
+  // Démarre le chrono principal s'il est arrêté
+  if (!matchState.clock.running) startMainClock();
 
   matchState.possession.interval = setInterval(tickPossession, 1000);
 }
 
 function stopPossession() {
   matchState.possession.running = false;
-  if (matchState.possession.interval) {
-    clearInterval(matchState.possession.interval);
-    matchState.possession.interval = null;
-  }
+  clearInterval(matchState.possession.interval);
+  matchState.possession.interval = null;
+
+  // STOP DU CHRONO PRINCIPAL EST OPTIONNEL : on peut commenter ou décommenter
+  // stopMainClock();
+
+  broadcast();
 }
+
 
 function resetPossession() {
   stopPossession();
