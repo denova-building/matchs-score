@@ -137,30 +137,46 @@ function tickPossession() {
 
 
 function startPossession(team) {
-  if (matchState.possession.interval) return; // déjà en cours
+    // Si déjà en cours, ne rien faire
+    if (matchState.possession.running) return;
 
-  matchState.possession.team = team;
-  matchState.possession.running = true;
+    // Si le temps était déjà entamé, on reprend, sinon on remet à 12
+    if (!matchState.possession.time || matchState.possession.time <= 0) {
+        matchState.possession.time = 12;
+    }
 
-  // Si on n'avait pas de temps restant, on initialise à 12
-  if (matchState.possession.time === 0) matchState.possession.time = 12;
+    matchState.possession.team = team;
+    matchState.possession.running = true;
 
-  // Démarre le chrono principal s'il est arrêté
-  if (!matchState.clock.running) startMainClock();
+    matchState.possession.interval = setInterval(() => {
+        if (!matchState.possession.running) return;
 
-  matchState.possession.interval = setInterval(tickPossession, 1000);
+        if (matchState.possession.time === 0) {
+            stopPossession();
+            return;
+        }
+
+        matchState.possession.time--;
+        io.emit('possession:update', {
+            team: matchState.possession.team,
+            time: matchState.possession.time,
+            running: matchState.possession.running
+        });
+    }, 1000);
 }
 
 function stopPossession() {
-  matchState.possession.running = false;
-  clearInterval(matchState.possession.interval);
-  matchState.possession.interval = null;
+    matchState.possession.running = false;
+    clearInterval(matchState.possession.interval);
+    matchState.possession.interval = null;
 
-  // STOP DU CHRONO PRINCIPAL EST OPTIONNEL : on peut commenter ou décommenter
-  // stopMainClock();
-
-  broadcast();
+    io.emit('possession:update', {
+        team: matchState.possession.team,
+        time: matchState.possession.time,
+        running: matchState.possession.running
+    });
 }
+
 
 
 function resetPossession() {
