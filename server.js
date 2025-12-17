@@ -37,7 +37,14 @@ const matchState = {
     sec: 0,
     running: false,
     interval: null
+  },
+  possession: {
+    team: null,        // 'A' ou 'B'
+    time: 12,          // 12 ou 14 secondes
+    running: false,
+    interval: null
   }
+
 };
 
 /* ============================
@@ -106,6 +113,58 @@ function stopClock() {
   }
 }
 
+function possessionTick() {
+  try {
+    if (!matchState.possession.running) return;
+
+    if (matchState.possession.time <= 0) {
+      stopPossession();
+      return;
+    }
+
+    matchState.possession.time--;
+    broadcast();
+  } catch (err) {
+    console.error('Erreur possessionTick:', err);
+  }
+}
+
+function startPossession(team, seconds) {
+  try {
+    stopPossession();
+
+    matchState.possession.team = team;
+    matchState.possession.time = seconds;
+    matchState.possession.running = true;
+
+    matchState.possession.interval = setInterval(possessionTick, 1000);
+    broadcast();
+  } catch (err) {
+    console.error('Erreur startPossession:', err);
+  }
+}
+function stopPossession() {
+  try {
+    matchState.possession.running = false;
+    clearInterval(matchState.possession.interval);
+    matchState.possession.interval = null;
+    broadcast();
+  } catch (err) {
+    console.error('Erreur stopPossession:', err);
+  }
+}
+function resetPossession(seconds = 12) {
+  try {
+    stopPossession();
+    matchState.possession.time = seconds;
+    matchState.possession.team = null;
+    broadcast();
+  } catch (err) {
+    console.error('Erreur resetPossession:', err);
+  }
+}
+
+
 /* ============================
    SOCKET EVENTS
 ============================ */
@@ -166,6 +225,9 @@ io.on('connection', socket => {
       if (![1,2].includes(pts)) return;
       matchState[`score${team}`] += pts;
       broadcast();
+      // RESET POSSESSION APRÈS PANIER
+      resetPossession(12);
+
     } catch(err){console.error('Erreur score:add:', err);}
   });
 
@@ -194,6 +256,25 @@ io.on('connection', socket => {
       broadcast();
     } catch(err){console.error('Erreur foul:sub:', err);}
   });
+
+  // POSSESSION START
+  socket.on('possession:start', ({ team, seconds }) => {
+    if (!['A', 'B'].includes(team)) return;
+    if (![12, 14].includes(seconds)) return;
+    startPossession(team, seconds);
+  });
+
+  // POSSESSION STOP
+  socket.on('possession:stop', () => {
+    stopPossession();
+  });
+
+  // POSSESSION RESET
+  socket.on('possession:reset', ({ seconds }) => {
+    if (![12, 14].includes(seconds)) return;
+    resetPossession(seconds);
+  });
+
 
   socket.on('disconnect', () => {
     console.log('❌ Client déconnecté');
