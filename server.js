@@ -47,9 +47,9 @@ const matchState = {
     interval: null
   },
   possession: {
-    team: null,
+    team: 'A',
     time: 12,
-    running: false,
+    running: true,
     interval: null
   }
 };
@@ -181,7 +181,8 @@ function stopPossession() {
 
 function resetPossession() {
   stopPossession();
-  matchState.possession.team = null;
+  //matchState.possession.team = null;
+  matchState.possession.team = 'A';
   matchState.possession.time = 12;
   broadcast();
 }
