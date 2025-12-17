@@ -1,26 +1,9 @@
 const express = require('express');
 const http = require('http');
-const cors = require('cors');
 const { Server } = require('socket.io');
 
 const app = express();
 const server = http.createServer(app);
-
-/* ============================
-   CORS EXPRESS (OBLIGATOIRE)
-============================ */
-app.use(cors({
-  origin: [
-    'https://mbolostats.com',
-    'https://www.mbolostats.com'
-  ],
-  methods: ['GET', 'POST'],
-  credentials: true
-}));
-
-app.get('/', (req, res) => {
-  res.send('Socket server running ✅');
-});
 
 /* ============================
    SOCKET.IO — RENDER SAFE
@@ -28,17 +11,15 @@ app.get('/', (req, res) => {
 const io = new Server(server, {
   transports: ['polling', 'websocket'],
   cors: {
-    origin: [
-      'https://mbolostats.com',
-      'https://www.mbolostats.com'
-    ],
+    origin: true,
     methods: ['GET', 'POST'],
     credentials: true
-  }
+  },
+  allowEIO3: true
 });
 
 /* ============================
-   MATCH STATE (JSON PUR)
+   ÉTAT DU MATCH
 ============================ */
 const matchState = {
   teamA: '',
@@ -53,119 +34,90 @@ const matchState = {
   clock: {
     min: 10,
     sec: 0,
-    running: false
+    interval: null
   },
   possession: {
     team: null,
     time: 12,
-    running: false
+    interval: null
   }
 };
 
-/* ============================
-   RUNTIME (INTERVALS SEULEMENT)
-============================ */
-const runtime = {
-  clockInterval: null,
-  possessionInterval: null
-};
+let gameRunning = false; // état maître
 
 /* ============================
-   EMITS SÉPARÉS (IMPORTANT)
+   BROADCAST
 ============================ */
-const emitState = () => {
-  io.emit('state:update', {
-    teamA: matchState.teamA,
-    teamB: matchState.teamB,
-    scoreA: matchState.scoreA,
-    scoreB: matchState.scoreB,
-    foulA: matchState.foulA,
-    foulB: matchState.foulB,
-    quarter: matchState.quarter
-  });
-};
-
-const emitClock = () => {
-  io.emit('clock:update', {
-    min: matchState.clock.min,
-    sec: matchState.clock.sec,
-    running: matchState.clock.running
-  });
-};
-
-const emitPossession = () => {
-  io.emit('possession:update', {
-    team: matchState.possession.team,
-    time: matchState.possession.time,
-    running: matchState.possession.running
-  });
-};
+function broadcast() {
+  io.emit('state:update', matchState);
+}
 
 /* ============================
    CHRONO PRINCIPAL
 ============================ */
-function startClock() {
-  if (runtime.clockInterval) return;
+function tickMainClock() {
+  if (!gameRunning) return;
 
-  matchState.clock.running = true;
-
-  runtime.clockInterval = setInterval(() => {
-    if (matchState.clock.min === 0 && matchState.clock.sec === 0) {
-      stopClock();
+  if (matchState.clock.sec === 0) {
+    if (matchState.clock.min === 0) {
+      stopMainClock();
       return;
     }
+    matchState.clock.min--;
+    matchState.clock.sec = 59;
+  } else {
+    matchState.clock.sec--;
+  }
 
-    if (matchState.clock.sec === 0) {
-      matchState.clock.min--;
-      matchState.clock.sec = 59;
-    } else {
-      matchState.clock.sec--;
-    }
-
-    emitClock();
-  }, 1000);
+  broadcast();
 }
 
-function stopClock() {
-  clearInterval(runtime.clockInterval);
-  runtime.clockInterval = null;
-  matchState.clock.running = false;
-  emitClock();
+function startMainClock() {
+  if (matchState.clock.interval) return;
+  matchState.clock.interval = setInterval(tickMainClock, 1000);
+}
+
+function stopMainClock() {
+  clearInterval(matchState.clock.interval);
+  matchState.clock.interval = null;
 }
 
 /* ============================
-   CHRONO POSSESSION 12s
+   CHRONO DE POSSESSION
 ============================ */
+function tickPossession() {
+  if (!gameRunning) return;
+
+  if (matchState.possession.time === 0) {
+    stopPossession();
+    return;
+  }
+
+  matchState.possession.time--;
+  broadcast();
+}
+
 function startPossession(team) {
-  stopPossession();
+  stopPossession(); // reset
+  if (!gameRunning) return;
 
   matchState.possession.team = team;
   matchState.possession.time = 12;
-  matchState.possession.running = true;
-
-  runtime.possessionInterval = setInterval(() => {
-    if (matchState.possession.time <= 0) {
-      stopPossession();
-      return;
-    }
-
-    matchState.possession.time--;
-    emitPossession();
-  }, 1000);
+  matchState.possession.interval = setInterval(tickPossession, 1000);
+  broadcast();
 }
 
 function stopPossession() {
-  clearInterval(runtime.possessionInterval);
-  runtime.possessionInterval = null;
-  matchState.possession.running = false;
-  emitPossession();
+  clearInterval(matchState.possession.interval);
+  matchState.possession.interval = null;
+  broadcast();
 }
 
 function resetPossession() {
   stopPossession();
   matchState.possession.team = null;
   matchState.possession.time = 12;
-  emitPossession();
+  broadcast();
 }
 
 /* ============================
@@ -174,86 +126,88 @@ function resetPossession() {
 io.on('connection', socket => {
   console.log('✅ Client connecté');
 
-  emitState();
-  emitClock();
-  emitPossession();
+  socket.emit('state:update', matchState);
 
   /* INIT MATCH */
   socket.on('match:init', data => {
-    stopClock();
+    stopMainClock();
     resetPossession();
 
-    matchState.teamA = data.teamA || 'Équipe A';
-    matchState.teamB = data.teamB || 'Équipe B';
-    matchState.defaultQuarterTime = parseInt(data.quarterTime) || 10;
-
+    matchState.teamA = data.teamA || 'ÉQUIPE A';
+    matchState.teamB = data.teamB || 'ÉQUIPE B';
     matchState.scoreA = 0;
     matchState.scoreB = 0;
     matchState.foulA = 0;
     matchState.foulB = 0;
     matchState.quarter = 1;
     matchState.overtime = false;
-
+    matchState.defaultQuarterTime = parseInt(data.quarterTime) || 10;
     matchState.clock.min = matchState.defaultQuarterTime;
     matchState.clock.sec = 0;
 
-    emitState();
-    emitClock();
+    gameRunning = false; // match initialisé mais pas démarré
+    broadcast();
   });
 
-  /* CLOCK */
-  socket.on('clock:start', startClock);
-  socket.on('clock:stop', stopClock);
+  /* START / STOP JEU */
+  socket.on('game:start', () => {
+    gameRunning = true;
+    startMainClock();
+    if (matchState.possession.team) startPossession(matchState.possession.team);
+  });
 
+  socket.on('game:stop', () => {
+    gameRunning = false;
+    stopMainClock();
+    stopPossession();
+  });
+
+  /* QUARTER / OVERTIME */
   socket.on('quarter:next', () => {
-    stopClock();
+    stopMainClock();
     matchState.quarter++;
     matchState.clock.min = matchState.defaultQuarterTime;
     matchState.clock.sec = 0;
-    emitState();
-    emitClock();
+    broadcast();
   });
 
   socket.on('overtime:start', () => {
-    stopClock();
+    stopMainClock();
     matchState.overtime = true;
     matchState.clock.min = 5;
     matchState.clock.sec = 0;
-    emitState();
-    emitClock();
+    broadcast();
   });
 
   /* SCORES */
   socket.on('score:add', ({ team, pts }) => {
-    if (!['A', 'B'].includes(team)) return;
-    if (![1, 2].includes(pts)) return;
+    if (!['A','B'].includes(team) || ![1,2].includes(pts)) return;
     matchState[`score${team}`] += pts;
-    emitState();
+    broadcast();
   });
 
   socket.on('score:sub', ({ team, pts }) => {
-    if (!['A', 'B'].includes(team)) return;
-    if (![1, 2].includes(pts)) return;
+    if (!['A','B'].includes(team) || ![1,2].includes(pts)) return;
     matchState[`score${team}`] = Math.max(0, matchState[`score${team}`] - pts);
-    emitState();
+    broadcast();
   });
 
   /* FAUTES */
   socket.on('foul:add', ({ team }) => {
-    if (!['A', 'B'].includes(team)) return;
+    if (!['A','B'].includes(team)) return;
     matchState[`foul${team}`]++;
-    emitState();
+    broadcast();
   });
 
   socket.on('foul:sub', ({ team }) => {
-    if (!['A', 'B'].includes(team)) return;
+    if (!['A','B'].includes(team)) return;
     matchState[`foul${team}`] = Math.max(0, matchState[`foul${team}`] - 1);
-    emitState();
+    broadcast();
   });
 
   /* POSSESSION */
   socket.on('possession:start', ({ team }) => {
-    if (!['A', 'B'].includes(team)) return;
+    if (!['A','B'].includes(team)) return;
     startPossession(team);
   });
 
