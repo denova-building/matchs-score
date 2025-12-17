@@ -14,8 +14,7 @@ const io = new Server(server, {
     origin: true,
     methods: ['GET', 'POST'],
     credentials: true
-  },
-  allowEIO3: true
+  }
 });
 
 /* ============================
@@ -31,195 +30,130 @@ const matchState = {
   quarter: 1,
   overtime: false,
   defaultQuarterTime: 10,
-  clock: {
-    min: 10,
-    sec: 0,
-    running: false,
-    interval: null
-  },
-  possession: {
-    team: null,
-    time: 12,
-    running: false,
-    interval: null
-  }
+  clock: { min: 10, sec: 0, running: false, interval: null },
+  possession: { team: null, time: 12, running: false, interval: null }
 };
 
 /* ============================
-   BROADCAST
+   EMITS SÉPARÉS
 ============================ */
-function broadcast() {
-  io.emit('state:update', matchState);
-}
+const emitState = () => io.emit('state:update', {
+  teamA: matchState.teamA,
+  teamB: matchState.teamB,
+  scoreA: matchState.scoreA,
+  scoreB: matchState.scoreB,
+  foulA: matchState.foulA,
+  foulB: matchState.foulB,
+  quarter: matchState.quarter
+});
+
+const emitClock = () => io.emit('clock:update', {
+  min: matchState.clock.min,
+  sec: matchState.clock.sec,
+  running: matchState.clock.running
+});
+
+const emitPossession = () => io.emit('possession:update', {
+  team: matchState.possession.team,
+  time: matchState.possession.time,
+  running: matchState.possession.running
+});
 
 /* ============================
    CHRONO PRINCIPAL
 ============================ */
-function tickMainClock() {
-  if (!matchState.clock.running) return;
-
-  if (matchState.clock.sec === 0) {
-    if (matchState.clock.min === 0) {
-      stopMainClock();
-      return;
-    }
-    matchState.clock.min--;
-    matchState.clock.sec = 59;
-  } else {
-    matchState.clock.sec--;
-  }
-
-  broadcast();
-}
-
-function startMainClock() {
+function startClock() {
   if (matchState.clock.interval) return;
   matchState.clock.running = true;
-  matchState.clock.interval = setInterval(tickMainClock, 1000);
+  matchState.clock.interval = setInterval(() => {
+    if (matchState.clock.min === 0 && matchState.clock.sec === 0) return stopClock();
+    if (matchState.clock.sec === 0) {
+      matchState.clock.min--;
+      matchState.clock.sec = 59;
+    } else matchState.clock.sec--;
+    emitClock();
+  }, 1000);
 }
 
-function stopMainClock() {
+function stopClock() {
   matchState.clock.running = false;
   clearInterval(matchState.clock.interval);
   matchState.clock.interval = null;
+  emitClock();
 }
 
 /* ============================
-   CHRONO DE POSSESSION (3x3)
+   POSSESSION 12s
 ============================ */
 function startPossession(team) {
-  if (matchState.possession.interval) return;
-
+  stopPossession();
   matchState.possession.team = team;
   matchState.possession.time = 12;
   matchState.possession.running = true;
 
   matchState.possession.interval = setInterval(() => {
-    if (!matchState.possession.running) return;
-
-    if (matchState.possession.time === 0) {
-      stopPossession();
-      return;
-    }
-
+    if (matchState.possession.time <= 0) return stopPossession();
     matchState.possession.time--;
-    broadcast();
+    emitPossession();
   }, 1000);
 }
 
 function stopPossession() {
-  matchState.possession.running = false;
   clearInterval(matchState.possession.interval);
   matchState.possession.interval = null;
+  matchState.possession.running = false;
+  emitPossession();
 }
 
 function resetPossession() {
   stopPossession();
   matchState.possession.team = null;
   matchState.possession.time = 12;
-  broadcast();
+  emitPossession();
 }
 
 /* ============================
    SOCKET EVENTS
 ============================ */
 io.on('connection', socket => {
-  console.log('✅ Client connecté');
-
   socket.emit('state:update', matchState);
+  emitClock();
+  emitPossession();
 
-  /* INIT MATCH */
-  socket.on('match:init', data => {
-    stopMainClock();
-    resetPossession();
-
-    matchState.teamA = data.teamA || 'ÉQUIPE A';
-    matchState.teamB = data.teamB || 'ÉQUIPE B';
-    matchState.scoreA = 0;
-    matchState.scoreB = 0;
-    matchState.foulA = 0;
-    matchState.foulB = 0;
-    matchState.quarter = 1;
-    matchState.overtime = false;
-    matchState.defaultQuarterTime = parseInt(data.quarterTime) || 10;
+  socket.on('match:init', d => {
+    stopClock(); resetPossession();
+    matchState.teamA = d.teamA || 'A';
+    matchState.teamB = d.teamB || 'B';
+    matchState.defaultQuarterTime = d.quarterTime || 10;
     matchState.clock.min = matchState.defaultQuarterTime;
     matchState.clock.sec = 0;
-
-    broadcast();
+    matchState.scoreA = matchState.scoreB = 0;
+    matchState.foulA = matchState.foulB = 0;
+    matchState.quarter = 1;
+    emitState(); emitClock();
   });
 
-  /* CLOCK */
-  socket.on('clock:start', startMainClock);
-  socket.on('clock:stop', stopMainClock);
-
+  socket.on('clock:start', startClock);
+  socket.on('clock:stop', stopClock);
   socket.on('quarter:next', () => {
-    stopMainClock();
+    stopClock();
     matchState.quarter++;
     matchState.clock.min = matchState.defaultQuarterTime;
     matchState.clock.sec = 0;
-    broadcast();
+    emitState(); emitClock();
   });
 
-  socket.on('overtime:start', () => {
-    stopMainClock();
-    matchState.overtime = true;
-    matchState.clock.min = 5;
-    matchState.clock.sec = 0;
-    broadcast();
-  });
+  socket.on('score:add', d => { matchState[`score${d.team}`] += d.pts; emitState(); });
+  socket.on('score:sub', d => { matchState[`score${d.team}`] = Math.max(0, matchState[`score${d.team}`] - d.pts); emitState(); });
+  socket.on('foul:add', d => { matchState[`foul${d.team}`]++; emitState(); });
+  socket.on('foul:sub', d => { matchState[`foul${d.team}`] = Math.max(0, matchState[`foul${d.team}`] - 1); emitState(); });
 
-  /* SCORES */
-  socket.on('score:add', ({ team, pts }) => {
-    if (!['A','B'].includes(team)) return;
-    if (![1,2].includes(pts)) return;
-    matchState[`score${team}`] += pts;
-    broadcast();
-  });
-
-  socket.on('score:sub', ({ team, pts }) => {
-    if (!['A','B'].includes(team)) return;
-    if (![1,2].includes(pts)) return;
-    matchState[`score${team}`] = Math.max(0, matchState[`score${team}`] - pts);
-    broadcast();
-  });
-
-  /* FAUTES */
-  socket.on('foul:add', ({ team }) => {
-    if (!['A','B'].includes(team)) return;
-    matchState[`foul${team}`]++;
-    broadcast();
-  });
-
-  socket.on('foul:sub', ({ team }) => {
-    if (!['A','B'].includes(team)) return;
-    matchState[`foul${team}`] = Math.max(0, matchState[`foul${team}`] - 1);
-    broadcast();
-  });
-
-  /* POSSESSION */
-  socket.on('possession:start', ({ team }) => {
-    if (!['A','B'].includes(team)) return;
-    stopPossession();
-    startPossession(team);
-    broadcast();
-  });
-
-  socket.on('possession:stop', () => {
-    stopPossession();
-    broadcast();
-  });
-
+  socket.on('possession:start', d => startPossession(d.team));
+  socket.on('possession:stop', stopPossession);
   socket.on('possession:reset', resetPossession);
-
-  socket.on('disconnect', () => {
-    console.log('❌ Client déconnecté');
-  });
 });
 
 /* ============================
    SERVER
 ============================ */
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Serveur lancé sur le port ${PORT}`);
-});
+server.listen(process.env.PORT || 3000);
