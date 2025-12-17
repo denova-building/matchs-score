@@ -131,10 +131,41 @@ function tickPossession() {
   broadcast();
 }
 
-
 function startPossession(team) {
-  console.log(matchState.possession.running);
-  console.log(matchState.possession.time);
+  // 🔒 Si la possession est déjà en cours, on ne relance pas
+  if (matchState.possession.running) return;
+
+  // SI CHANGEMENT D'ÉQUIPE → reset à 12 secondes
+  if (matchState.possession.team !== team) {
+    matchState.possession.time = 12;
+  }
+
+  // Définir l'équipe en possession
+  matchState.possession.team = team;
+
+  //  Sécurité : si on est à 0, on repart à 12
+  if (matchState.possession.time <= 0) {
+    matchState.possession.time = 12;
+  }
+
+  matchState.possession.running = true;
+
+  matchState.possession.interval = setInterval(() => {
+    if (!matchState.possession.running) return;
+
+    if (matchState.possession.time === 0) {
+      stopPossession();
+      return;
+    }
+
+    matchState.possession.time--;
+    broadcast();
+  }, 1000);
+}
+
+
+/*function startPossession(team) {
+  
     // Si déjà en cours, ne rien faire
     if (matchState.possession.running) return;
 
@@ -158,42 +189,14 @@ function startPossession(team) {
     }, 1000);
 
 
-    /*matchState.possession.interval = setInterval(() => {
-        if (!matchState.possession.running) return;
-
-        if (matchState.possession.time === 0) {
-            stopPossession();
-            return;
-        }
-
-        matchState.possession.time--;
-        io.emit('possession:update', {
-            team: matchState.possession.team,
-            time: matchState.possession.time,
-            running: matchState.possession.running
-        });
-    }, 1000);*/
-}
+    
+}*/
 
 function stopPossession() {
   matchState.possession.running = false;
   clearInterval(matchState.possession.interval);
   matchState.possession.interval = null;
 }
-
-
-/*function stopPossession() {
-    matchState.possession.running = false;
-    clearInterval(matchState.possession.interval);
-    matchState.possession.interval = null;
-
-    io.emit('possession:update', {
-        team: matchState.possession.team,
-        time: matchState.possession.time,
-        running: matchState.possession.running
-    });
-}*/
-
 
 
 function resetPossession() {
