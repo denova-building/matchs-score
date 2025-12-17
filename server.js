@@ -273,6 +273,7 @@ io.on('connection', socket => {
   socket.on('possession:start', ({ team }) => {
     if (!['A','B'].includes(team)) return;
     startPossession(team);
+    startMainClock(); //chrono global
     broadcast();
   });
 
