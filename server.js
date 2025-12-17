@@ -102,10 +102,6 @@ function tickMainClock() {
 function startMainClock() {
   if (matchState.clock.running) return;
   matchState.clock.running = true;
-
-  // Stop le chrono de possession si déjà lancé
-  if (matchState.possession.running) stopPossession();
-
   matchState.clock.interval = setInterval(tickMainClock, 1000);
 }
 
@@ -149,8 +145,20 @@ function startPossession(team) {
 
     matchState.possession.team = team;
     matchState.possession.running = true;
-
     matchState.possession.interval = setInterval(() => {
+      if (!matchState.possession.running) return;
+
+      if (matchState.possession.time === 0) {
+        stopPossession();
+        return;
+      }
+
+      matchState.possession.time--;
+      broadcast(); // ✅ UN SEUL canal
+    }, 1000);
+
+
+    /*matchState.possession.interval = setInterval(() => {
         if (!matchState.possession.running) return;
 
         if (matchState.possession.time === 0) {
@@ -164,10 +172,17 @@ function startPossession(team) {
             time: matchState.possession.time,
             running: matchState.possession.running
         });
-    }, 1000);
+    }, 1000);*/
 }
 
 function stopPossession() {
+  matchState.possession.running = false;
+  clearInterval(matchState.possession.interval);
+  matchState.possession.interval = null;
+}
+
+
+/*function stopPossession() {
     matchState.possession.running = false;
     clearInterval(matchState.possession.interval);
     matchState.possession.interval = null;
@@ -177,7 +192,7 @@ function stopPossession() {
         time: matchState.possession.time,
         running: matchState.possession.running
     });
-}
+}*/
 
 
 
@@ -272,15 +287,15 @@ io.on('connection', socket => {
   /* POSSESSION */
   socket.on('possession:start', ({ team }) => {
     if (!['A','B'].includes(team)) return;
-    startPossession(team);
     startMainClock(); //chrono global
+    startPossession(team);
     broadcast();
   });
 
-  socket.on('possession:stop', () => {
+  /*socket.on('possession:stop', () => {
     stopPossession();
     broadcast();
-  });
+  });*/
 
   socket.on('possession:reset', () => {
     resetPossession();
@@ -296,5 +311,5 @@ io.on('connection', socket => {
 ============================ */
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`🚀 Serveur lancé sur le port ${PORT}`);
+  console.log(`🚀 Serveur lancé sur ${PORT}`);
 });
