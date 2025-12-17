@@ -49,7 +49,7 @@ const matchState = {
   possession: {
     team: 'A',
     time: 12,
-    running: true,
+    running: false,
     interval: null
   }
 };
@@ -137,6 +137,8 @@ function tickPossession() {
 
 
 function startPossession(team) {
+  console.log(matchState.possession.running);
+  console.log(matchState.possession.time);
     // Si déjà en cours, ne rien faire
     if (matchState.possession.running) return;
 
