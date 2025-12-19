@@ -132,6 +132,36 @@ function tickPossession() {
 }
 
 function startPossession(team) {
+  if (!['A', 'B'].includes(team)) return;
+
+  // 🛑 Toujours nettoyer l'interval en cours
+  if (matchState.possession.interval) {
+    clearInterval(matchState.possession.interval);
+    matchState.possession.interval = null;
+  }
+
+  // 🔄 Changement d'équipe OU relance → reset à 12
+  matchState.possession.team = team;
+  matchState.possession.time = 12;
+  matchState.possession.running = true;
+
+  matchState.possession.interval = setInterval(() => {
+    if (!matchState.possession.running) return;
+
+    if (matchState.possession.time === 0) {
+      stopPossession();
+      return;
+    }
+
+    matchState.possession.time--;
+    broadcast();
+  }, 1000);
+
+  broadcast();
+}
+
+
+/*function startPossession(team) {
   // 🔒 Si la possession est déjà en cours, on ne relance pas
   if (matchState.possession.running) return;
 
@@ -161,36 +191,8 @@ function startPossession(team) {
     matchState.possession.time--;
     broadcast();
   }, 1000);
-}
-
-
-/*function startPossession(team) {
-  
-    // Si déjà en cours, ne rien faire
-    if (matchState.possession.running) return;
-
-    // Si le temps était déjà entamé, on reprend, sinon on remet à 12
-    if (!matchState.possession.time || matchState.possession.time <= 0) {
-        matchState.possession.time = 12;
-    }
-
-    matchState.possession.team = team;
-    matchState.possession.running = true;
-    matchState.possession.interval = setInterval(() => {
-      if (!matchState.possession.running) return;
-
-      if (matchState.possession.time === 0) {
-        stopPossession();
-        return;
-      }
-
-      matchState.possession.time--;
-      broadcast(); // ✅ UN SEUL canal
-    }, 1000);
-
-
-    
 }*/
+
 
 function stopPossession() {
   matchState.possession.running = false;
