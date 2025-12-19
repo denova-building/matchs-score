@@ -50,6 +50,7 @@ const matchState = {
     team: 'A',
     time: 12,
     running: false,
+    paused: false,
     interval: null
   }
 };
@@ -163,23 +164,24 @@ function tickPossession() {
 function startPossession(team) {
   if (!['A', 'B'].includes(team)) return;
 
-  const sameTeam =
-    matchState.possession.running &&
-    matchState.possession.team === team;
+  const sameTeam = matchState.possession.team === team;
+  const resumeSamePossession =
+    sameTeam && matchState.possession.paused;
 
-  // 🛑 Toujours nettoyer l'interval
+  // Nettoyage sécurité
   if (matchState.possession.interval) {
     clearInterval(matchState.possession.interval);
     matchState.possession.interval = null;
   }
 
-  // 🔄 Reset à 12 SEULEMENT si changement d'équipe
-  if (!sameTeam) {
+  // 🔁 Reset à 12 UNIQUEMENT si changement d'équipe
+  if (!resumeSamePossession) {
     matchState.possession.time = 12;
   }
 
   matchState.possession.team = team;
   matchState.possession.running = true;
+  matchState.possession.paused = false;
 
   matchState.possession.interval = setInterval(() => {
     if (!matchState.possession.running) return;
@@ -197,12 +199,22 @@ function startPossession(team) {
 }
 
 
-
 function stopPossession() {
+  if (matchState.possession.interval) {
+    clearInterval(matchState.possession.interval);
+    matchState.possession.interval = null;
+  }
+
+  matchState.possession.running = false;
+  matchState.possession.paused = true; // ⬅️ IMPORTANT
+}
+
+
+/*function stopPossession() {
   matchState.possession.running = false;
   clearInterval(matchState.possession.interval);
   matchState.possession.interval = null;
-}
+}*/
 
 
 function resetPossession() {
