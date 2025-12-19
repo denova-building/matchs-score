@@ -284,6 +284,33 @@ io.on('connection', socket => {
     broadcast();
   });
 
+  socket.on('match:reset', () => {
+    // Stop clocks
+    stopMainClock();
+    stopPossession();
+
+    // Reset matchState
+    matchState.teamA = '';
+    matchState.teamB = '';
+    matchState.scoreA = 0;
+    matchState.scoreB = 0;
+    matchState.foulA = 0;
+    matchState.foulB = 0;
+    matchState.quarter = 1;
+    matchState.overtime = false;
+    matchState.defaultQuarterTime = 10;
+    matchState.clock.min = matchState.defaultQuarterTime;
+    matchState.clock.sec = 0;
+    matchState.clock.running = false;
+    matchState.possession.team = 'A';
+    matchState.possession.time = 12;
+    matchState.possession.running = false;
+
+    // Broadcast new state
+    broadcast();
+});
+
+
   /* CLOCK */
   socket.on('clock:start', startMainClock);
   socket.on('clock:stop', stopMainClock);
