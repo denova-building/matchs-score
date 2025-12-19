@@ -131,7 +131,7 @@ function tickPossession() {
   broadcast();
 }
 
-function startPossession(team) {
+/*function startPossession(team) {
   if (!['A', 'B'].includes(team)) return;
 
   // 🛑 Toujours nettoyer l'interval en cours
@@ -158,26 +158,27 @@ function startPossession(team) {
   }, 1000);
 
   broadcast();
-}
+}*/
 
+function startPossession(team) {
+  if (!['A', 'B'].includes(team)) return;
 
-/*function startPossession(team) {
-  // 🔒 Si la possession est déjà en cours, on ne relance pas
-  if (matchState.possession.running) return;
+  const sameTeam =
+    matchState.possession.running &&
+    matchState.possession.team === team;
 
-  // SI CHANGEMENT D'ÉQUIPE → reset à 12 secondes
-  if (matchState.possession.team !== team) {
+  // 🛑 Toujours nettoyer l'interval
+  if (matchState.possession.interval) {
+    clearInterval(matchState.possession.interval);
+    matchState.possession.interval = null;
+  }
+
+  // 🔄 Reset à 12 SEULEMENT si changement d'équipe
+  if (!sameTeam) {
     matchState.possession.time = 12;
   }
 
-  // Définir l'équipe en possession
   matchState.possession.team = team;
-
-  //  Sécurité : si on est à 0, on repart à 12
-  if (matchState.possession.time <= 0) {
-    matchState.possession.time = 12;
-  }
-
   matchState.possession.running = true;
 
   matchState.possession.interval = setInterval(() => {
@@ -191,7 +192,10 @@ function startPossession(team) {
     matchState.possession.time--;
     broadcast();
   }, 1000);
-}*/
+
+  broadcast();
+}
+
 
 
 function stopPossession() {
