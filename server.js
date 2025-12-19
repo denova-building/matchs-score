@@ -52,7 +52,9 @@ const matchState = {
     running: false,
     paused: false,
     interval: null
-  }
+  },
+  finished: false,
+  winner: null
 };
 
 /* ============================
@@ -120,7 +122,7 @@ function stopMainClock() {
 /* ============================
    CHRONO DE POSSESSION
 ============================ */
-function tickPossession() {
+/*function tickPossession() {
   if (!matchState.possession.running) return;
 
   if (matchState.possession.time === 0) {
@@ -130,7 +132,32 @@ function tickPossession() {
 
   matchState.possession.time--;
   broadcast();
+}*/
+
+function endMatch() {
+  // Stop tous les chronos
+  stopMainClock();
+  stopPossession();
+
+  matchState.finished = true;
+
+  if (matchState.scoreA > matchState.scoreB) {
+    matchState.winner = 'A';
+  } else if (matchState.scoreB > matchState.scoreA) {
+    matchState.winner = 'B';
+  } else {
+    matchState.winner = 'DRAW';
+  }
+
+  io.emit('match:ended', {
+    winner: matchState.winner,
+    scoreA: matchState.scoreA,
+    scoreB: matchState.scoreB,
+    teamA: matchState.teamA,
+    teamB: matchState.teamB
+  });
 }
+
 
 /*function startPossession(team) {
   if (!['A', 'B'].includes(team)) return;
@@ -313,14 +340,14 @@ io.on('connection', socket => {
     broadcast();
   });
 
-  /*socket.on('possession:stop', () => {
-    stopPossession();
-    broadcast();
-  });*/
-
   socket.on('possession:reset', () => {
     resetPossession();
   });
+
+  socket.on('match:end', () => {
+    endMatch();
+  });
+
 
   socket.on('disconnect', () => {
     console.log('❌ Client déconnecté');
